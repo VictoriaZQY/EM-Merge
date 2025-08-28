@@ -36,6 +36,10 @@ The detailed process steps can be found in [detailed steps](figures/流程图1.p
 
 Please first download the large-scale datasets for log parsing in LogPub from [Zenodo](https://zenodo.org/record/8275861) and unzip these datasets into the directory of `full_dataset`.
 
+### Model - SentenceBERT
+Add "pytorch_model.bin" into `benchmark/logparser/EM-Merge/models/all-MiniLM-L6-v2` from SentenceBERT.
+
+
 ###  Installation
 
 1. Install ```python >= 3.8```
