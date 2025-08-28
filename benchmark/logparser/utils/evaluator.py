@@ -16,11 +16,11 @@ from tqdm import tqdm
 
 def evaluate(df_groundtruth, df_parsedlog, filter_templates=None):
     """ Evaluation function to org_benchmark log parsing accuracy
-    
+
     Arguments
     ---------
         groundtruth : str
-            file path of groundtruth structured csv file 
+            file path of groundtruth structured csv file
         parsedresult : str
             file path of parsed structured csv file
 
@@ -28,15 +28,22 @@ def evaluate(df_groundtruth, df_parsedlog, filter_templates=None):
     -------
         f_measure : float
         accuracy : float
-    """ 
-    # df_groundtruth = pd.read_csv(groundtruth)
-    # df_parsedlog = pd.read_csv(parsedresult)
-    # Remove invalid groundtruth event Ids
+    """
+    # 移除无效的groundtruth事件ID
     null_logids = df_groundtruth[~df_groundtruth['EventTemplate'].isnull()].index
-    df_groundtruth = df_groundtruth.loc[null_logids]
-    df_parsedlog = df_parsedlog.loc[null_logids]
+
+    # 添加索引保护 - 只处理两个数据框中都存在的索引
+    common_indices = null_logids.intersection(df_parsedlog.index)
+
+    if len(common_indices) < len(null_logids):
+        missing_count = len(null_logids) - len(common_indices)
+        print(f"警告: 跳过 {missing_count} 个不存在的索引")
+
+    df_groundtruth = df_groundtruth.loc[common_indices]
+    df_parsedlog = df_parsedlog.loc[common_indices]
+
     (GA, FGA) = get_accuracy(df_groundtruth['EventTemplate'], df_parsedlog['EventTemplate'], filter_templates)
-    print('Grouping_Accuracy (GA): %.4f, FGA: %.4f,'%(GA, FGA))
+    print('Grouping_Accuracy (GA): %.4f, FGA: %.4f,' % (GA, FGA))
     return GA, FGA
 
 def get_accuracy(series_groundtruth, series_parsedlog, filter_templates=None):

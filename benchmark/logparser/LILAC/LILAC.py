@@ -1,29 +1,129 @@
-import math
-
-import os
 import sys
 
-from .Template import Template
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+import regex as re
+import os
+import numpy as np
 import pandas as pd
 from datetime import datetime
+import json
 from .gpt_query import query_template_from_gpt_with_check
 from .parsing_cache import ParsingCache
 from .prompt_select import prompt_select
+from .post_process import correct_single_template
 from .utils import load_pickle, save_pickle, load_tuple_list, cache_to_file, read_json_file
-from merge_template import get_similar_templates, merge_templates_by_lcs
-from split_template import split_template_by_lcs
-from .Template import Template  # 确保引入 Template 类
+from tqdm import tqdm
+# 在文件顶部添加导入
+import numpy as np
+from .parsing_cache import CONFIDENCE_THRESHOLD, SEMANTIC_THRESHOLD, SIMILARITY_THRESHOLD
 
-###########################################################
-# 改进版 LogParser 类
-###########################################################
+
+def save_results_to_csv(log_file, template_file, cache_file, output_file, output_template_file):
+    with open(log_file, 'r') as f:
+        lines_a = f.readlines()
+    with open(template_file, 'r') as f:
+        lines_b = f.readlines()
+    cache = load_pickle(cache_file)
+
+    # 获取最大索引
+    max_idx = max([int(line.split(' ')[0]) for line in lines_a]) if lines_a else 0
+    total_expected = max_idx + 1
+
+    # 创建完整的结果数组
+    contents = [''] * total_expected
+    event_templates = ['NoMatch'] * total_expected
+    eventids = ['E0'] * total_expected  # 默认事件ID
+
+    # 填充解析结果
+    for line in lines_a:
+        parts = line.strip().split(' ', 1)
+        if len(parts) < 2:
+            continue
+        idx, content = parts
+        idx = int(idx)
+        if idx < total_expected:
+            contents[idx] = content
+
+    # 填充模板
+    for line in lines_b:
+        parts = line.strip().split(' ', 1)
+        if len(parts) < 2:
+            continue
+        idx, template_id = parts
+        idx = int(idx)
+        template_id = int(template_id)
+        if idx < total_expected:
+            try:
+                event_templates[idx] = cache.template_list[template_id]
+            except:
+                event_templates[idx] = "InvalidTemplate"
+
+    # 创建模板映射
+    templates_set = []
+    template_id_map = {}
+    for template in set(event_templates):
+        if template != "NoMatch" and template != "InvalidTemplate":
+            templates_set.append(template)
+            template_id_map[template] = f"E{len(templates_set)}"
+
+    # 设置事件ID
+    for idx, template in enumerate(event_templates):
+        if template in template_id_map:
+            eventids[idx] = template_id_map[template]
+
+    # 创建LineId列
+    lineids = list(range(1, total_expected + 1))
+    # ============== 修改结束 ==============
+
+    df = pd.DataFrame({
+        'LineId': lineids,
+        'EventId': eventids,
+        'Content': contents,
+        'EventTemplate': event_templates
+    })
+    df.to_csv(output_file, index=False)
+
+    template_ids = [f"E{i + 1}" for i in range(len(templates_set))]
+    df = pd.DataFrame({'EventId': template_ids, 'EventTemplate': templates_set})
+    df.to_csv(output_template_file, index=False)
+
+
+def load_regs():
+    regs_common = []
+    with open("../logparser/LILAC/common.json", "r") as fr:
+        dic = json.load(fr)
+    
+    patterns = dic['COMMON']['regex']
+    for pattern in patterns:
+        regs_common.append(re.compile(pattern))
+    return regs_common
+
+
+def check_model_files():
+    model_path = os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2")
+    required_files = [
+        "config.json", "pytorch_model.bin", "sentence_bert_config.json",
+        "tokenizer.json", "vocab.txt", "special_tokens_map.json", "tokenizer_config.json"
+    ]
+
+    missing_files = []
+    for file in required_files:
+        if not os.path.exists(os.path.join(model_path, file)):
+            missing_files.append(file)
+
+    if missing_files:
+        print(f"Error: Missing model files: {', '.join(missing_files)}")
+        print("Please download the following files from:")
+        print("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/main")
+        print("and place them in the directory:", model_path)
+        sys.exit(1)
+
+
+
 class LogParser:
+    check_model_files()
+
     def __init__(self, log_format, indir='./', outdir='./result/', rex=[],
-                 data_type='2k', shot=0, example_size=0, model="gpt-3.5-turbo-0613", selection_method="LILAC",
-                 split_threshold: int = 50):
+                 data_type='2k', shot=0, example_size=0, model="gpt-3.5-turbo-0613", selection_method="LILAC"):
         self.path = indir
         self.df_log = None
         self.log_format = log_format
@@ -32,7 +132,6 @@ class LogParser:
         self.example_size = example_size
         self.selection_method = selection_method
         self.model = model
-        self.split_threshold = split_threshold  # 当模板下样本总数超过该阈值时触发拆分
 
     def parse(self, logName):
         print('Parsing file: ' + os.path.join(self.path, logName))
@@ -49,7 +148,8 @@ class LogParser:
         if not os.path.exists(evaluation_path):
             os.makedirs(evaluation_path)
         self.load_data()
-        regs_common = self.load_regs()
+
+        regs_common = load_regs()
 
         cached_tree = os.path.join(output_path, "cached_tree.pkl")
         cached_log = os.path.join(output_path, "cached_log.txt")
@@ -66,127 +166,129 @@ class LogParser:
             idx = 0
 
         prompt_cases = None if self.shot == 0 else read_json_file(f"../../full_dataset/sampled_examples/{dataset_name}/{self.shot}shot.json")
+
         num_query = 0
         total_line = len(self.df_log)
-        cache_step = max(total_line // 5, 1)
+        cache_step = total_line // 5
+
         if idx + 1 < total_line:
-            for log in list(self.df_log[idx:]['Content']):
-                flag = self.process_log(cache, log, log_messages, log_templates, idx, prompt_cases, regs_common, total_line)
+            for i in range(idx, total_line):
+                log = self.df_log.iloc[i]['Content']
+                flag = self.process_log(cache, [log], log_messages, log_templates, i, prompt_cases, regs_common,
+                                        total_line)
                 if flag:
                     num_query += 1
-                idx += 1
-                if idx % cache_step == 0:
-                    print("Finished processing line: ", idx)
+                    print("Query times: ", num_query)
+                if i % cache_step == 0:
+                    print("Finished processing line: ", i)
                     cache_to_file(log_messages, cached_log)
                     cache_to_file(log_templates, cached_template)
                     save_pickle(cache, cached_tree)
+
+            # 添加完整性检查
+            processed_indices = set(msg[1] for msg in log_messages)
+            if len(processed_indices) < total_line:
+                missing_count = total_line - len(processed_indices)
+                print(f"警告: {missing_count} 行日志未被处理")
+
+                # 填充缺失行
+                for i in range(total_line):
+                    if i not in processed_indices:
+                        log = self.df_log.iloc[i]['Content']
+                        log_messages.append((log, i))
+                        log_templates.append((-1, i))  # 使用-1表示缺失
         if num_query > 0:
             print("Total query: ", num_query)
+
         cache_to_file(log_messages, cached_log)
         cache_to_file(log_templates, cached_template)
         save_pickle(cache, cached_tree)
-        self.save_results_to_csv(cached_log, cached_template, cached_tree,
-                                 os.path.join(evaluation_path, f"{dataset_name}_{self.data_type}.log_structured.csv"),
-                                 os.path.join(evaluation_path, f"{dataset_name}_{self.data_type}.log_templates.csv"))
+        save_results_to_csv(cached_log, cached_template, cached_tree,
+                            os.path.join(evaluation_path, f"{dataset_name}_{self.data_type}.log_structured.csv"),
+                            os.path.join(evaluation_path, f"{dataset_name}_{self.data_type}.log_templates.csv"))
+
         print('Parsing done. [Time taken: {!s}]'.format(datetime.now() - start_time))
 
-    def process_log(self, cache, log, log_messages, log_templates, idx, prompt_cases, regs_common, total_line):
-        """
-        对每一行日志：
-         - 先检查缓存中是否有匹配模板；
-         - 若无匹配，则调用 GPT 生成模板，并尝试合并；
-         - 将日志样本记录加入缓存，并检查是否需要触发模板拆分。
-        """
-        results = cache.match_event(log)
-        if results[0] == "NoMatch":
-            print("===========================================")
-            print(f"Line-{idx}/{total_line}: No match. {log}")
-            examples = prompt_select(prompt_cases, log, self.example_size, self.selection_method) if prompt_cases else []
-            new_template, normal = query_template_from_gpt_with_check(log, regs_common, examples, self.model)
-            # 尝试与缓存中已有模板合并
-            new_template = self.template_merge(new_template, cache)
-            print("Merged/Generated Template: ", new_template)
-            # 将新模板加入缓存，返回模板 id
-            template_id = cache.add_templates(new_template, normal, results[2])
+    def process_log(self, cache, logs, log_messages, log_templates, idx, prompt_cases, regs_common, total_line):
+        try:
+            new_template = None
+            log = logs[0]  # 每次只处理一行日志
+            results = cache.match_event(log)
+
+            if results[0] == "NoMatch":
+                print("===========================================")
+                print(f"Line-{idx}/{total_line}: No match. {log}")
+                if prompt_cases != None:
+                    examples = prompt_select(prompt_cases, log, self.example_size, self.selection_method)
+                else:
+                    examples = []
+
+                # 获取置信度
+                new_template, normal, confidence = query_template_from_gpt_with_check(
+                    log, regs_common, examples, self.model
+                )
+                print("queried_new_template: ", new_template)
+
+                # 新增：EM-Merge后处理模块
+                if confidence > CONFIDENCE_THRESHOLD:  # 仅处理高置信度模板
+                    # 语义嵌入近邻搜索
+                    semantic_neighbors = cache.find_semantic_neighbors(
+                        new_template,
+                        SEMANTIC_THRESHOLD
+                    )
+
+                    if semantic_neighbors:
+                        # 置信度加权结构相似度计算
+                        candidate_group = cache.weighted_similarity_grouping(
+                            new_template,
+                            confidence,
+                            semantic_neighbors,
+                            SIMILARITY_THRESHOLD
+                        )
+
+                        if candidate_group:
+                            # 模板合并
+                            merged_template = cache.merge_templates(
+                                [new_template] + candidate_group
+                            )
+                            print(f"Merged template: {merged_template} (from {len(candidate_group) + 1} templates)")
+                            new_template = merged_template
+
+                # 后处理模块结束
+
+                template_id = cache.add_templates(new_template, confidence, normal, results[2])
+                log_messages.append((log, idx))
+                log_templates.append((template_id, idx))
+                print("===========================================")
+                return True
+            else:
+                log_messages.append((log, idx))
+                log_templates.append((results[1], idx))
+                return False
+        except Exception as e:
+            print(f"处理日志行 {idx} 时出错: {e}")
+            # 出错时使用默认值
+            log = logs[0]
+            new_template = "NoMatch"
+            template_id = cache.add_templates("NoMatch", 0, True, [])
             log_messages.append((log, idx))
             log_templates.append((template_id, idx))
-            cache.add_sample_to_template(log, template_id, idx)
-            self.template_split(template_id, cache)
             print("===========================================")
             return True
-        else:
-            template_id = results[1]
-            log_messages.append((log, idx))
-            log_templates.append((template_id, idx))
-            # 若日志已存在，则更新计数；否则新增样本记录
-            samples = cache.get_samples_by_template(template_id)
-            found = False
-            for sample in samples:
-                if sample['log'] == log:
-                    cache.update_sample_log(sample)
-                    found = True
-                    break
-            if not found:
-                cache.add_sample_to_template(log, template_id, idx)
-            self.template_split(template_id, cache)
-            return False
 
-    def template_merge(self, new_template, cache) -> str:
-        """
-        模板合并：
-         - 将 new_template 包装为 Template 对象（如果尚未包装）；
-         - 从缓存中获取所有已有模板；
-         - 利用 get_similar_templates 找出与新模板相似的模板；
-         - 若存在相似模板，则调用 merge_templates_by_lcs 进行合并，返回合并后的模板文本，否则返回原模板文本。
-        """
-        from .Template import Template  # 确保引入 Template 类
-        if not hasattr(new_template, "template_text"):
-            new_template_obj = Template(new_template)
-        else:
-            new_template_obj = new_template
-
-        existing_templates = []
-        for tpl in cache.template_list:
-            if hasattr(tpl, "template_text"):
-                existing_templates.append(tpl)
-            else:
-                existing_templates.append(Template(tpl))
-
-        similar_templates = get_similar_templates(existing_templates, new_template_obj, cluster_enable=True)
-        if similar_templates:
-            merged_template = merge_templates_by_lcs(similar_templates)
-            # 修改处：使用 merged_template.template_text.strip() 而非 merged_template.strip()
-            if merged_template and merged_template.template_text.strip():
-                return merged_template.template_text
-        return new_template_obj.template_text
-
-    def template_split(self, template_id, cache) -> None:
-        """
-        检查模板下的样本总数，若超过拆分阈值则触发模板拆分操作：
-         - 根据样本数量计算拆分因子，利用外部函数 split_template_by_lcs 进行拆分；
-         - 删除原模板，并为每个拆分结果插入新模板，同时更新对应样本记录。
-        """
-        sample_count = cache.select_sample_len_by_template(template_id)
-        if sample_count >= self.split_threshold:
-            samples = cache.get_samples_by_template(template_id)
-            split_factor = round(math.log(sample_count, 2))
-            split_results = split_template_by_lcs(samples, split_factor)
-            cache.remove_template(template_id)
-            for new_template_text, split_samples in split_results:
-                new_id = cache.add_templates(new_template_text, normal=True, extra_info=[])
-                for sample in split_samples:
-                    cache.update_sample_template(sample, new_id)
-            print(f"Template {template_id} split into {len(split_results)} templates (sample count: {sample_count}).")
 
     def load_data(self):
-        csv_path = os.path.join(self.path, self.logName + '_structured.csv')
+        csv_path = os.path.join(self.path, self.logName+'_structured.csv')
         if os.path.exists(csv_path):
             self.df_log = pd.read_csv(csv_path)
         else:
             headers, regex = self.generate_logformat_regex(self.log_format)
             self.df_log = self.log_to_dataframe(os.path.join(self.path, self.logName), regex, headers, self.log_format)
 
+
     def log_to_dataframe(self, log_file, regex, headers, logformat):
+        """ Function to transform log file to dataframe 
+        """
         log_messages = []
         linecount = 0
         with open(log_file, 'r') as fin:
@@ -199,65 +301,24 @@ class LogParser:
                 except Exception as e:
                     pass
         logdf = pd.DataFrame(log_messages, columns=headers)
-        logdf.insert(0, 'LineId', list(range(1, linecount + 1)))
+        logdf.insert(0, 'LineId', None)
+        logdf['LineId'] = [i + 1 for i in range(linecount)]
         return logdf
 
+
     def generate_logformat_regex(self, logformat):
+        """ Function to generate regular expression to split log messages
+        """
         headers = []
-        splitters = __import__('re').split(r'(<[^<>]+>)', logformat)
+        splitters = re.split(r'(<[^<>]+>)', logformat)
         regex = ''
-        for k, part in enumerate(splitters):
+        for k in range(len(splitters)):
             if k % 2 == 0:
-                splitter = __import__('re').sub(' +', '\\\s+', splitters[k])
+                splitter = re.sub(' +', '\\\s+', splitters[k])
                 regex += splitter
             else:
-                header = part.strip('<>').strip()
-                regex += f'(?P<{header}>.*?)'
+                header = splitters[k].strip('<').strip('>')
+                regex += '(?P<%s>.*?)' % header
                 headers.append(header)
-        regex = __import__('re').compile('^' + regex + '$')
+        regex = re.compile('^' + regex + '$')
         return headers, regex
-
-    def load_regs(self):
-        regs_common = []
-        with open("../logparser/LILAC/common.json", "r") as fr:
-            dic = __import__('json').load(fr)
-        patterns = dic['COMMON']['regex']
-        for pattern in patterns:
-            regs_common.append(__import__('re').compile(pattern))
-        return regs_common
-
-    def save_results_to_csv(self, log_file, template_file, cache_file, output_file, output_template_file):
-        with open(log_file, 'r') as f:
-            lines_a = f.readlines()
-        with open(template_file, 'r') as f:
-            lines_b = f.readlines()
-        cache = load_pickle(cache_file)
-        total_len = len(lines_a)
-        lineids = list(range(1, total_len + 1))
-        eventids = [''] * total_len
-        contents = [''] * total_len
-        event_templates = [''] * total_len
-        templates_set = []
-        print("start writing log structured csv.")
-        for (line_a, line_b) in zip(lines_a, lines_b):
-            idx_a, str_a = line_a.strip().split(' ', 1)
-            idx_b, str_b = line_b.strip().split(' ', 1)
-            idx_a, idx_b = int(idx_a), int(idx_b)
-            str_b = cache.template_list[int(str_b)]
-            if idx_a != idx_b:
-                print(f"Error in line: {idx_a} {idx_b}")
-                return
-            if str_b in templates_set:
-                template_id = templates_set.index(str_b) + 1
-            else:
-                templates_set.append(str_b)
-                template_id = len(templates_set)
-            contents[idx_a] = str_a
-            event_templates[idx_a] = str_b
-            eventids[idx_a] = f"E{template_id}"
-        print("end writing log structured csv.")
-        df = pd.DataFrame({'LineId': lineids, 'EventId': eventids, 'Content': contents, 'EventTemplate': event_templates})
-        df.to_csv(output_file, index=False)
-        template_ids = [f"E{i+1}" for i in range(len(templates_set))]
-        df = pd.DataFrame({'EventId': template_ids, 'EventTemplate': templates_set})
-        df.to_csv(output_template_file, index=False)

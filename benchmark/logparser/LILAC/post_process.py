@@ -1,21 +1,12 @@
 import regex as re
 
-"""这段代码的主要目的是将 LLM 日志模板进行归一化，使其更易于处理和分析，具体包括：
-
-去除多余空格（DS）
-分割日志字符串，使用分隔符提取 token
-归一化数字（DG）
-归一化变量（WV、DV、CV）
-处理各种分隔符（#、:、/、@、. 等）"""
-
-
 param_regex = [
     r'{([ :_#.\-\w\d]+)}',
     r'{}'
 ]
 
 
-def  correct_single_template(template, user_strings=None):
+def correct_single_template(template, user_strings=None):
     """Apply all rules to process a template.
 
     DS (Double Space)

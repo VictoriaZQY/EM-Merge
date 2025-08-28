@@ -96,10 +96,6 @@ def calculate_parsing_accuracy_lstm(groundtruth_df, parsedresult_df, filter_temp
     for i in range(len(groundtruth_templates)):
         if correct_lstm(groundtruth_templates[i], parsedresult_templates[i]):
             correctly_parsed_messages += 1
-        else:
-            print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
-            print("Incorrect. ground truth: "+groundtruth_templates[i] +"\n parsed result: "+parsedresult_templates[i])
-            print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
 
     PA = float(correctly_parsed_messages) / len(groundtruth_templates)
 

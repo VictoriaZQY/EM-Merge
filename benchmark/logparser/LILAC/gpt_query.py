@@ -6,6 +6,8 @@ import string
 import json
 from .parsing_cache import ParsingCache
 from .post_process import correct_single_template
+# 在文件顶部添加导入
+import numpy as np
 
 
 def get_openai_key(file_path):
@@ -51,10 +53,31 @@ def infer_llm(instruction, exemplars, query, log_message, model='gpt-3.5-turbo-0
                     messages=messages,
                     temperature=temperature,
                     stream=False,
-                    # frequency_penalty=0.0,
-                    # presence_penalty=0.0,
+                    # 添加logprobs参数以获取置信度信息
+                    logprobs=True,
+                    top_logprobs=1,
                 )
-                return [response["message"]["content"] for response in answers["choices"] if response['finish_reason'] != 'length'][0]
+
+                # 提取响应内容
+                response_content = [response["message"]["content"] for response in answers["choices"] if
+                                    response['finish_reason'] != 'length'][0]
+
+                # 计算置信度（使用token概率的几何平均）
+                token_logprobs = []
+                for choice in answers["choices"]:
+                    if 'logprobs' in choice and 'content' in choice['logprobs']:
+                        for token_info in choice['logprobs']['content']:
+                            if token_info and 'logprob' in token_info:
+                                token_logprobs.append(token_info['logprob'])
+
+                if token_logprobs:
+                    # 将logprobs转换为概率并计算几何平均
+                    token_probs = [np.exp(lp) for lp in token_logprobs]
+                    confidence = np.exp(np.mean(np.log(token_probs)))  # 几何平均
+                else:
+                    confidence = 1.0  # 默认值
+
+                return response_content, confidence
             except Exception as e:
                 print("Exception :", e)
                 if "list index out of range" in str(e):
@@ -69,8 +92,22 @@ def infer_llm(instruction, exemplars, query, log_message, model='gpt-3.5-turbo-0
                     prompt=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    # 添加logprobs参数
+                    logprobs=1,
                 )
-                return response['choices'][0]['text'].strip()
+
+                # 提取响应内容
+                response_content = response['choices'][0]['text'].strip()
+
+                # 计算置信度
+                token_logprobs = response['choices'][0]['logprobs']['token_logprobs']
+                if token_logprobs:
+                    token_probs = [np.exp(lp) for lp in token_logprobs]
+                    confidence = np.exp(np.mean(np.log(token_probs)))  # 几何平均
+                else:
+                    confidence = 1.0
+
+                return response_content, confidence
             except Exception as e:
                 print("Exception :", e)
                 retry_times += 1
@@ -80,7 +117,7 @@ def infer_llm(instruction, exemplars, query, log_message, model='gpt-3.5-turbo-0
         or exemplars[0]['answer'] != 'Log template: `try to connected to host: {ip_address}, finished.`':
             examples = [{'query': 'Log message: `try to connected to host: 172.16.254.1, finished.`', 'answer': 'Log template: `try to connected to host: {ip_address}, finished.`'}]
             return infer_llm(instruction, examples, query, log_message, model, temperature, max_tokens)
-    return 'Log message: `{}`'.format(log_message)
+    return 'Log message: `{}`'.format(log_message), 1.0  # 返回默认置信度
 
 
 def get_response_from_openai_key(query, examples=[], model='gpt-3.5-turbo-0613', temperature=0.0):
@@ -90,16 +127,17 @@ def get_response_from_openai_key(query, examples=[], model='gpt-3.5-turbo-0613',
     if examples is None or len(examples) == 0:
         examples = [{'query': 'Log message: `try to connected to host: 172.16.254.1, finished.`', 'answer': 'Log template: `try to connected to host: {ip_address}, finished.`'}]
     question = 'Log message: `{}`'.format(query)
-    responses = infer_llm(instruction, examples, question, query,
-                          model, temperature, max_tokens=2048)
-    return responses
+    # 调用infer_llm并获取响应和置信度
+    response, confidence = infer_llm(instruction, examples, question, query,
+                                     model, temperature, max_tokens=2048)
+    return response, confidence
 
 
 def query_template_from_gpt(log_message, examples=[], model='gpt-3.5-turbo-0613'):
     if len(log_message.split()) == 1:
-        return log_message, False
+        return log_message, False, 1.0  # 返回默认置信度
     # print("prompt base: ", prompt_base)
-    response = get_response_from_openai_key(log_message, examples, model)
+    response, confidence = get_response_from_openai_key(log_message, examples, model)
     # print(response)
     lines = response.split('\n')
     log_template = None
@@ -122,13 +160,13 @@ def query_template_from_gpt(log_message, examples=[], model='gpt-3.5-turbo-0613'
 
         if start_index != 0 and end_index != -1 and start_index < end_index:
             template = log_template[start_index:end_index]
-            return template, True
+            return template, True, confidence
 
     print("======================================")
     print("ChatGPT response format error: ")
     print(response)
     print("======================================")
-    return log_message, False
+    return log_message, False, confidence
 
 
 def post_process_template(template, regs_common):
@@ -147,9 +185,14 @@ def post_process_template(template, regs_common):
 
 
 def query_template_from_gpt_with_check(log_message, regs_common=[], examples=[], model="gpt-3.5-turbo-0613"):
-    template, flag = query_template_from_gpt(log_message, examples, model)
+    # 获取模板、成功标志和置信度
+    template, flag, confidence = query_template_from_gpt(log_message, examples, model)
+
     if len(template) == 0 or flag == False:
         print(f"ChatGPT error")
+        # 返回原始日志和默认置信度
+        processed_template, normal_flag = post_process_template(log_message, regs_common)
+        return processed_template, normal_flag, 0.5  # 低置信度
     else:
         tree = ParsingCache()
         template, flag = post_process_template(template, regs_common)
@@ -162,5 +205,8 @@ def query_template_from_gpt_with_check(log_message, regs_common=[], examples=[],
                 print(template)
                 print("==========================================================")
             else:
-                return template, True
-    return post_process_template(log_message, regs_common)
+                return template, True, confidence  # 返回模板、成功标志和置信度
+
+    # 后备处理
+    processed_template, normal_flag = post_process_template(log_message, regs_common)
+    return processed_template, normal_flag, confidence

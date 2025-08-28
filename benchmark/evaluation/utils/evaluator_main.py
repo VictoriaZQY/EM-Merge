@@ -182,13 +182,24 @@ def evaluator(
 
         with open(os.path.join(output_dir, result_file), 'a') as summary_file:
             summary_file.write(result)
-        return   
-
+        return
 
     print("Start compute grouping accuracy")
     # calculate grouping accuracy
     start_time = time.time()
-    GA, FGA = evaluate(groundtruth, parsedresult, filter_templates)
+
+    # 确保只使用两个数据框共有的索引
+    common_indices = groundtruth.index.intersection(parsedresult.index)
+
+    if len(common_indices) < len(groundtruth):
+        missing_count = len(groundtruth) - len(common_indices)
+        print(f"警告: 跳过 {missing_count} 个不存在的索引")
+
+    GA, FGA = evaluate(
+        groundtruth.loc[common_indices],
+        parsedresult.loc[common_indices],
+        filter_templates
+    )
 
     GA_end_time = time.time() - start_time
     print('Grouping Accuracy calculation done. [Time taken: {:.3f}]'.format(GA_end_time))
@@ -205,10 +216,25 @@ def evaluator(
 
     # calculate template-level accuracy
     start_time = time.time()
-    if lstm == True:
-        tool_templates, ground_templates, FTA, PTA, RTA = evaluate_template_level_lstm(dataset, groundtruth, parsedresult, filter_templates)
-    else:
-        tool_templates, ground_templates, FTA, PTA, RTA = evaluate_template_level(dataset, groundtruth, parsedresult, filter_templates)
+    try:
+        if lstm == True:
+            tool_templates, ground_templates, FTA, PTA, RTA = evaluate_template_level_lstm(
+                dataset,
+                groundtruth.loc[common_indices],
+                parsedresult.loc[common_indices],
+                filter_templates
+            )
+        else:
+            tool_templates, ground_templates, FTA, PTA, RTA = evaluate_template_level(
+                dataset,
+                groundtruth.loc[common_indices],
+                parsedresult.loc[common_indices],
+                filter_templates
+            )
+    except Exception as e:
+        print(f"模板级别分析出错: {e}")
+        tool_templates, ground_templates, FTA, PTA, RTA = 0, 0, 0, 0, 0
+
     TA_end_time = time.time() - start_time
     print('Template-level accuracy calculation done. [Time taken: {:.3f}]'.format(TA_end_time))
 

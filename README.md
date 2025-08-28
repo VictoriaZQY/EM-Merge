@@ -1,17 +1,15 @@
-# LILAC: Log Parsing using LLMs with Adaptive Parsing Cache
+# EM-Merge: Consolidating Fragmented Templates in LLM Log Parsing
 
-This is the replication package for [FSE24] ["LILAC: Log Parsing using LLMs with Adaptive Parsing Cache"](https://arxiv.org/abs/2310.01796).
+This is the replication package for [FSE24] ["EM-Merge: Consolidating Fragmented Templates in LLM Log Parsing"](https://arxiv.org/).
 
-In this paper, we propose LILAC, the first practical LLM-based log parsing framework.
-LILAC consists of two main components: the ICL-enhanced Parser and the adaptive parsing cache.
+In this paper, we propose EM-Merge, which consists of three main components: Semantic Embedding Extraction, Confidence-Weighted Similarity Scoring and Clustering & Merging.
 
-![The overall framework of LILAC](figures/framework.png)
+The overall process can be found in [overall process](figures/流程图1.pdf).
 
-The detailed parsing time can be found in [detailed parsing time for RQ4](figures/parsing_time.png).
+The detailed process steps can be found in [detailed steps](figures/流程图1.pdf).
 
-If you find our paper benefit your research, please kindly cite our related paper:
+---
 
-- Zhihan Jiang, Jinyang Liu, Zhuangbin Chen, Yichen Li, Junjie Huang, Yintong Huo, Pinjia He, Jiazhen Gu, Michael R. Lyu. [LILAC: Log Parsing using LLMs with Adaptive Parsing Cache](https://arxiv.org/abs/2310.01796) FSE, 2024. 
 
 ## Repository Organization 
 
@@ -19,8 +17,8 @@ If you find our paper benefit your research, please kindly cite our related pape
 ├── full_dataset/ # Please download and unzip full datasets into this directory
 │   └── sampled_examples # Our saved sampled candidates
 ├── benchmark/
-│   ├── evaluation/ # the evaluation code of LILAC
-│   └── logparser/ # the implementation code of LILAC
+│   ├── evaluation/ # the evaluation code 
+│   └── logparser/ # the implementation code 
 ├── result/
 │   └── ...... # contains the saved evaluation files
 ├── sampling/ # the implementation of candidate sampling algorithms

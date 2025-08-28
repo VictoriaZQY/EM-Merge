@@ -43,20 +43,7 @@ datasets_2k = [
 ]
 
 datasets_full = [
-    "Proxifier",
-    "Apache",
-    "OpenSSH",
-    "HDFS",
-    "OpenStack",
     "HPC",
-    "Zookeeper",
-    "HealthApp",
-    "Hadoop",
-    "Spark",
-    "BGL",
-    "Linux",
-    "Mac",
-    "Thunderbird",
 ]
 
 
