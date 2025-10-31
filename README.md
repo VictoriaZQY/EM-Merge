@@ -4,7 +4,7 @@ This is the replication package for ["EM-Merge: Consolidating Fragmented Templat
 
 In this paper, we propose EM-Merge, which consists of three main components: Semantic Embedding Extraction, Confidence-Weighted Similarity Scoring, and Clustering & Merging.
 
-The overall process can be found in [overall process](figures/流程图1.pdf).
+The overall process can be found in [overall process](figures/workflow.pdf).
 <img width="1421" height="496" alt="image" src="https://github.com/user-attachments/assets/c4e6fd61-3bec-47b9-ad0b-7c0d32c133dc" />
 
 
