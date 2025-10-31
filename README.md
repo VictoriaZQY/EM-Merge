@@ -1,11 +1,11 @@
 # EM-Merge: Consolidating Fragmented Templates in LLM Log Parsing
 
-This is the replication package for ["EM-Merge: Consolidating Fragmented Templates in LLM Log Parsing"](https://arxiv.org/).
+This is the replication package for ["EM-Merge: Consolidating Fragmented Templates in LLM Log Parsing"]([https://arxiv.org/](https://www.setta2025.uk/accepted-papers)).
 
 In this paper, we propose EM-Merge, which consists of three main components: Semantic Embedding Extraction, Confidence-Weighted Similarity Scoring, and Clustering & Merging.
 
 The overall process can be found in [overall process](figures/workflow.pdf).
-<img width="1418" height="495" alt="image" src="https://github.com/user-attachments/assets/9043177a-97e1-4331-a669-5f16e9ad4c64" />.
+<img width="1419" height="500" alt="image" src="https://github.com/user-attachments/assets/13c22ab0-e494-4ecf-b6ac-5acd260ae14c" />
 
 
 The detailed process steps can be found in [detailed steps](figures/分步图(3).pdf).
