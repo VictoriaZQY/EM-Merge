@@ -29,6 +29,7 @@ This work was completed in July 2025, and the essay was completed in August 2025
 ├── sampling/ # the implementation of candidate sampling algorithms
 │   ├── logppt_sampling.py # the sampling algorithm of LogPPT
 │   └── LILAC_sampling.py # the sampling algorithm of LILAC
+│   └── EM-Merge_sampling.py # the sampling algorithm of EM-Merge
 ├── requirements.txt
 ├── openai_key.txt # the OpenAI api address and key
 └── README.md
@@ -57,18 +58,18 @@ Add "pytorch_model.bin" into `benchmark/logparser/EM-Merge/models/all-MiniLM-L6-
 
     We have provided the saved sampled candidate logs for reproducing.
 
-    One can also delete the `full_dataset/sampled_examples` and execute the LILAC's sampling algorithm as follows:
+    One can also delete the `full_dataset/sampled_examples` and execute the EM-Merge's sampling algorithm as follows:
 
     ```bash
     cd sampling/
-    python LILAC_sampling.py
+    python EM-Merge_sampling.py
     ```
 
 - Online Log Parsing
 
     Please first add an OpenAI API key (`sk-xxxx`) into the second line of openai_key.txt.
 
-    We provide a one-click script to run LILAC for online log parsing.
+    We provide a one-click script to run EM-Merge for online log parsing.
 
     ```bash
     ./online_parsing.sh
@@ -77,9 +78,9 @@ Add "pytorch_model.bin" into `benchmark/logparser/EM-Merge/models/all-MiniLM-L6-
     One can also go to `benchmark/evaluation` and execute:
 
     ```bash
-    python LILAC_eval.py --shot [candidates] --example_size [demonstrations] --model [model]
+    python EM-Merge_eval.py --shot [candidates] --example_size [demonstrations] --model [model]
     ```
 
 The parsed results and evaluation results will be saved in the `result/` directory.
 
-We have provided the saved evaluation metric files of LILAC with different settings in the directory of `result/`.
+We have provided the saved evaluation metric files of EM-Merge with different settings in the directory of `result/`.
